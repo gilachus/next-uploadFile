@@ -1,0 +1,51 @@
+import fs from 'fs';
+import formidable from 'formidable';
+import { NextApiRequest, NextApiResponse } from 'next';
+import { parseForm } from '@/utils/formidable';
+import { SITE_URL } from '@/utils/constants';
+import { snowflake } from '@airplan/utils/snowflake';
+import { minioClient } from '@/utils/minio-client';
+
+async function fileUpload(req: NextApiRequest, res: NextApiResponse) {
+  try {
+    const formsBucket = process.env.MINIO_FORMS_BUCKET || "";
+
+    const form = formidable({
+      multiples: true,
+      maxFileSize: 1 * 1024 * 1024, // Dynamic size, default is 1 MB (in bytes)
+    });
+    const { files } = (await parseForm(form, req)) as any;
+
+    const file = files.file[0];
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png']; // Define allowed MIME types
+    if (!allowedTypes.includes(file.mimetype)) {
+      throw new Error('File type not allowed.');
+    }
+
+    const fileExt = `.${file.originalFilename.split('.').pop() || 'txt'}`;
+    const fileName = (site) ? `${site}-${snowflake.generate()}${fileExt}` : `${snowflake.generate()}${fileExt}`;
+
+    await minioClient.putObject(formsBucket, fileName, fs.readFileSync(file.filepath), file.size, function (err: any, objInfo: any) {
+      if (err) {
+          return console.log(err)
+        }
+      console.log('Success')
+    })
+    
+    let message = "File uploaded successfully"
+    const value = `${SITE_URL}api/syncfile/${fileName}`;
+    
+    res.status(200).json({ message: message, publicUrl: value });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ data: null, error: 'Internal Server Error' });
+  }
+}
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+export default fileUpload;
