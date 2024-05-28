@@ -1,0 +1,55 @@
+import { NextApiRequest, NextApiResponse } from 'next';
+import formidable from 'formidable';
+import { createReadStream } from 'fs';
+import { snowflake } from '@airplan/utils/snowflake';
+import { createWriteStream } from '@airplan/utils/files-storage';
+
+import { parseForm } from '@/utils/formidable';
+import { SITE_URL } from '@/utils/constants';
+
+async function fileUpload(req: NextApiRequest, res: NextApiResponse) {
+  try {
+    const form = formidable({
+      multiples: true,
+      maxFileSize: 1 * 1024 * 1024, // Dynamic size, default is 1 MB (in bytes)
+    });
+    const { files } = (await parseForm(form, req)) as any;
+
+    const file = files.file[0];
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png']; // Define allowed MIME types
+    if (!allowedTypes.includes(file.mimetype)) {
+      throw new Error('File type not allowed.');
+    }
+
+    const fileExt = `.${file.originalFilename.split('.').pop() || 'txt'}`;
+    const fileName = `${snowflake.generate()}${fileExt}`;
+
+    const streamUploadFile = new Promise((resolve, reject) => {
+      createReadStream(file.filepath)
+        .pipe(createWriteStream(fileName, file.mimetype))
+        .on('error', (err) => {
+          console.error(err.message);
+          reject(err.message);
+        })
+        .on('finish', () => {
+          const publicUrl = `${SITE_URL}tmp/${fileName}`;
+          resolve(publicUrl);
+        });
+    });
+
+    const value = await streamUploadFile;
+
+    res.status(200).json({ publicUrl: value });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ data: null, error: 'Internal Server Error' });
+  }
+}
+
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+export default fileUpload;
